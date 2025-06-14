@@ -1,0 +1,67 @@
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION = 'us-east-1'
+        ECR_REGISTRY = credentials('586794450782.dkr.ecr.us-east-1.amazonaws.com/web-app') 
+        AWS_CREDENTIALS = credentials('aws-credentials')
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+        HELM_CHART_PATH = "./my-web-app/"
+        KUBECONFIG = "/var/lib/jenkins/.kube/config"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git url: 'https://github.com/Joy-it-code/helm-jenkins-cicd.git', branch: 'main'
+            }
+        }
+
+        stage('Lint Helm Chart') {
+            steps {
+                sh 'helm lint ${HELM_CHART_PATH}'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    docker.build("${ECR_REGISTRY}:${IMAGE_TAG}", "-f Dockerfile .")
+                }
+            }
+        }
+
+        stage('Push Docker Image to ECR') {
+            steps {
+                script {
+                    sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                    sh "docker push ${ECR_REGISTRY}:${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Deploy with Helm') {
+            steps {
+                sh "helm upgrade --install my-web-app ${HELM_CHART_PATH} --namespace default --set image.repository=${ECR_REGISTRY} --set image.tag=${IMAGE_TAG} --set replicaCount=2"
+            }
+        }
+
+        stage('Test Deployment') {
+            steps {
+                sh 'helm test my-web-app --namespace default'
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker logout'
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed. Check logs for details.'
+        }
+    }
+}

@@ -376,8 +376,8 @@ exec > /var/log/user-data.log 2>&1
 apt-get update -y
 apt-get upgrade -y
 
-# Install OpenJDK 11 for Jenkins
-apt-get install -y openjdk-11-jdk
+# Install OpenJDK 17 for Jenkins
+apt-get install -y openjdk-17-jdk
 
 # Install Jenkins
 wget -q -O /usr/share/keyrings/jenkins-keyring.asc https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
@@ -388,7 +388,7 @@ if ! apt-get install -y jenkins; then
   exit 1
 fi
 systemctl start jenkins
-systemctl enabl  e jenkins
+systemctl enable jenkins
 
 # Install Docker
 apt-get install -y apt-transport-https ca-certificates curl software-properties-common
@@ -403,7 +403,7 @@ usermod -aG docker ubuntu
 systemctl start docker
 systemctl enable docker
 
-# Install kubectl 
+# Install kubectl (use a specific version for reliability)
 KUBECTL_VERSION="v1.30.0"
 curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
 if [ $? -ne 0 ]; then
@@ -424,9 +424,26 @@ chmod 700 get_helm.sh
 ./get_helm.sh
 helm version
 
+if [ -d /home/ubuntu/.kube ]; then
+  chown -R ubuntu:ubuntu /home/ubuntu/.kube
+fi
+
+# Install AWS CLI
+echo "Installing AWS CLI..."
+curl -fsSL -o awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+sudo apt-get install -y unzip
+unzip awscliv2.zip
+sudo ./aws/install
+rm -f awscliv2.zip
+rm -rf aws
+
 # Ensure permissions
+chown -R jenkins:jenkins /var/lib/jenkins
+chown -R jenkins:jenkins /var/cache/jenkins
+chown -R jenkins:jenkins /var/log/jenkins
 chown -R ubuntu:ubuntu /home/ubuntu/.kube
-chown -R ubuntu:ubuntu /var/lib/jenkins
+
+echo " Jenkins + Docker + Helm + kubectl + AWS CLI are ready!"
 ```
 
 
@@ -988,25 +1005,39 @@ Create a Jenkinsfile in my-web-app
 ```
 pipeline {
     agent any
+
     environment {
         AWS_REGION = 'us-east-1'
-        ECR_REGISTRY = credentials('ecr-repository-url')
+        ECR_REGISTRY = credentials('ecr-repository-url') // e.g., 123456789012.dkr.ecr.us-east-1.amazonaws.com/my-web-app
         AWS_CREDENTIALS = credentials('aws-credentials')
         IMAGE_TAG = "${env.BUILD_NUMBER}"
+        HELM_CHART_PATH = "./"
+        KUBECONFIG = "/var/lib/jenkins/.kube/config"
     }
+
     stages {
         stage('Checkout') {
             steps {
-                git url: 'https://github.com/<your-username>/my-web-app.git', branch: 'main'
+                git url: 'https://github.com/xtojy/devops-journey.git', branch: 'main'
             }
         }
+
+        stage('Lint Helm Chart') {
+            steps {
+                sh 'helm lint ${HELM_CHART_PATH}'
+            }
+        }
+
         stage('Build Docker Image') {
             steps {
                 script {
-                    docker.build("${ECR_REGISTRY}:${IMAGE_TAG}")
+                    dir('..') {
+                        docker.build("${ECR_REGISTRY}:${IMAGE_TAG}", "-f Dockerfile .")
+                    }
                 }
             }
         }
+
         stage('Push Docker Image to ECR') {
             steps {
                 script {
@@ -1015,10 +1046,29 @@ pipeline {
                 }
             }
         }
+
         stage('Deploy with Helm') {
             steps {
-                sh "helm upgrade --install my-web-app ./my-web-app --set image.tag=${IMAGE_TAG}"
+                sh "helm upgrade --install my-web-app ${HELM_CHART_PATH} --namespace default --set image.repository=${ECR_REGISTRY} --set image.tag=${IMAGE_TAG} --set replicaCount=2"
             }
+        }
+
+        stage('Test Deployment') {
+            steps {
+                sh 'helm test my-web-app --namespace default'
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker logout'
+        }
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed. Check logs for details.'
         }
     }
 }
@@ -1034,7 +1084,7 @@ pipeline {
 
 + In Jenkins Dashboard, click “New Item”
 
-+ Enter a name like helm-capstone
++ Enter a name 
 
 + Choose Pipeline
 
@@ -1110,269 +1160,27 @@ http://your-jenkins-server/github-webhook/
 
 
 
-
-
-
-
-
-
-
-
-### Test the connection:
+### Test Locally:
+**Before pushing, test the pipeline stages manually:**
 ```
-kubectl get nodes
-kubectl get pods
-```
-![](./img/6a.kubeupdate.getnode.svc.png)
-
-
-
-### Deploy with Helm
-
-**Run on Project Root**
-```
-helm upgrade --install web-app ./helm/webapp \
---set image.repository=<account-id>.dkr.ecr.us-east-1.amazonaws.com/my-webapp \
---set image.tag=latest
+helm lint ./my-web-app/
+docker build -t <ecr-url>:test -f ../Dockerfile ../
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <ecr-url>
+docker push <ecr-url>:test
+helm upgrade --install my-web-app ./my-web-app/ --set image.repository=<ecr-url> --set image.tag=test --namespace default
 ```
 
-### Verify Deployment
+### Commit and Push:
 ```
-kubectl get svc -w
-```
-![](./img/6c.deploy.app.get.svc.png)
-
-
-
-
-### Verify the Deployment
-
-### a. Get All Kubernetes Resources
-```
-kubectl get all
-helm list
-kubectl get nodes
-```
-
-### b. Get LoadBalancer IP
-```
-kubectl get svc
+git add Jenkinsfile
+git commit -m "Add Jenkinsfile for ECR and Helm deployment"
+git push origin main
 ```
 
 
-### Test the Web App
-Open in your browser:
-
-```
-http://<EXTERNAL-IP>
-```
-OR
-
-```
-http://<LoadBalancer-DNS>
-```
-![](./img/7a.deployment1.png)
-
-
-----
-
-
-
-
-
-##  Deploying the App with Helm
-
-### Package and Deploy
-```
-cd my-app/
-```
-
-+ **Validate Chart**
-```
-helm lint .
-```
-
-
-## Helm Upgrade
-
-### Update your values.yaml
-```
-image:
-  repository: <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-webapp
-  tag: v3         
-  pullPolicy: IfNotPresent
-```
-
-+ Rebuild docker image and push
-
-```
- docker tag <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-webapp:latest <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-webapp:latest
-docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/my-webapp:latest
-```
-
-### Deploy New Image With Helm
-
-```
-helm upgrade web-app ./helm/webapp \
-  --set image.repository=<account-id>.dkr.ecr.us-east-1.amazonaws.com/my-webapp \
-  --set image.tag=v3
-```
-![](./img/7b.upgrade.png)
-
-
-### Verify after deploying:
-```
-kubectl get pods
-kubectl get svc
-```
-![](./img/7c.upgrade.get.pod.svc.png)
-
-
-### Check Log 
-```
-kubectl logs web-app-webapp-5545c57c8b-6fd47
-```
-![](./img/7d.health.check.png)
-
-
-### Accessing webapp on Terminal 
-**Port forward**
-```
-kubectl get pods
-kubectl port-forward pod/web-app-webapp-5545c57c8b-6fd47 9090:80
-```
-![](./img/7f.port.fwd.terminal.png)
-
-
-### On Browser
-```
-http://localhost:9090
-```
-![](./img/7e.port.fwd.on.browsr.png)
-
-
-
-### Accessing webapp via Load Balancer on Terminal
-```
-kubectl get svc
-kubectl get pods
-curl http://a1753a612076c4bc4aa6711f0df09b8c-259451018.us-east-1.elb.amazonaws.com
-```
-![](./img/8a.curl.http.success.terminal.png)
-
-
-### Load Balancer On Browser
-```
-http://a1753a612076c4bc4aa6711f0df09b8c-259451018.us-east-1.elb.amazonaws.com
-```
-![](./img/8b.http.elb.browsr.png)
-
-
-
-### Access the application and Port forward
-
-Use kubectl port-forward to test locally:
-```
-kubectl get service web-app-webapp
-kubectl port-forward service/web-app-webapp 8090:80
-```
-Then access app at:
-```
-http://localhost:8090
-```
-![](./img/8c.get.service.png)
-![](./img/8e.port.fwd.8090.png)
-![](./img/8d.local.8090.png)
-
-
-----
-
-### Watch rollout status of your deployment:
-```
-kubectl rollout status deployment/web-app-webapp
-helm history web-app
-```
-![](./img/8h.rollout.histry.png)
-
-
-## Roll Back a Helm Release
-```
-helm rollback web-app 1
-helm history web-app
-```
-![](./img/8i.rollbk.history.png)
-
-
-----
-
-
-## Step 4: Understanding Templates & Values
-
-**values.yaml**
-
-You can override anything from values.yaml at runtime:
-
-```
-helm install web-app ./web-app --set replicaCount=3
-```
-
-### Templating
-Files in **templates/** use Go templating:
-
-```
-image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-```
-
-----
-
-
-## Step 5: Integrating Helm with Jenkins
-
-+ **Goal**
-
-Automatically deploy the app to EKS using Helm from Jenkins when code is pushed.        
-
-### Verify Jenkins Integration Inside Jenkins:
-
-```
-aws eks list-clusters
-helm list --all --namespace default
-```
-
-
-## Add AWS Credentials in Jenkins
-+ Go to: Jenkins > Manage Jenkins > Credentials
-
-+ Add AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY as Username/Password credentials
-
-+ Give ID: aws-cred
-
-
-### 🔹Run the Pipeline
-
-+ On every Push to Github
-
-+ Watch console output for stages:
-
-+ Checkout
-
-+ Build Docker image
-
-+ Push to ECR
-
-+ Deploy with Helm
-
-
-### Destroy Infrastructure
+## Destroy Infrastructure
 ```
 terraform destroy
-```
-
-## Commit and Push Your Helm Chart to GitHub
-```
-git add .
-git commit -m "update file"
-git push 
 ```
 
 
@@ -1391,157 +1199,3 @@ With Helm handling application releases, and Jenkins controlling the CI/CD pipel
 
 
 
-### Create .gitignore
-
-Create a .gitignore file in the root of your project:
-
- ```
- touch .gitignore
- ```
-
-#### Paste the following into it:
-```
-# Terraform
-*.tfstate
-*.tfstate.*
-.terraform/
-.crash
-*.tfvars
-*.tfvars.json
-override.tf
-override.tf.json
-terraform.tfstate.backup
-.terraform.lock.hcl
-
-# Packer
-packer_cache/
-*.pkr.hcl.lock
-*.pkrvars.hcl
-setup-debug.log
-
-# User data scripts
-*.log
-*.zip
-*.bak
-
-# System
-.DS_Store
-Thumbs.db
-
-# IDEs/editors
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Credentials
-*.pem
-*.key
-.aws/
-```
-
-
-
-
-
-
-## Create Jenkinsfile
-
-**Paste**
-```
-pipeline {
-  agent any
-
-  environment {
-    AWS_REGION    = 'us-east-1'
-    ECR_ACCOUNT   = '<account-id>'
-    ECR_REPO      = "${ECR_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/my-webapp"
-    IMAGE_TAG     = 'latest'
-    CLUSTER_NAME  = 'jenkins-eks-cluster'
-    HELM_RELEASE  = 'webapp'
-    HELM_CHART    = './helm/webapp'
-  }
-
-  triggers {
-    githubPush()
-  }
-
-  stages {
-    stage('Checkout') {
-      steps {
-        git branch: 'main', url: 'https://github.com/username/repo-url.git''
-      }
-    }
-
-    stage('Build Docker Image') {
-      steps {
-        sh 'docker build -t $ECR_REPO:$IMAGE_TAG my-app'
-      }
-    }
-
-    stage('Login & Push to ECR') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'aws-credentials',
-                                          usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                          passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-          sh '''
-            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
-            aws configure set region $AWS_REGION
-            aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
-            docker push $ECR_REPO:$IMAGE_TAG
-          '''
-        }
-      }
-    }
-
-    stage('Deploy with Helm to EKS') {
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'aws-credentials',
-                                          usernameVariable: 'AWS_ACCESS_KEY_ID',
-                                          passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-          sh '''
-            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
-            aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION
-            helm upgrade --install $HELM_RELEASE $HELM_CHART \
-              --namespace default
-              --set image.repository=$ECR_REPO \
-              --set image.tag=$IMAGE_TAG
-          '''
-        }
-      }
-    }
-  }
-}
-```
-## Create Dockerfile
-```
-mkdir my-app
-nano Dockerfile 
-```
-
-**Paste**
-```
-# Dockerfile
-FROM nginx:alpine
-COPY ./public /usr/share/nginx/html
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
-```
-
-
-
-### Configure kubectl for EKS:
-```
-aws eks --region us-east-1 update-kubeconfig --name helm-jenkins-eks
-```
-
-### Test the cluster:
-```
-kubectl cluster-info
-kubectl get nodes
-```
-
-
-----
