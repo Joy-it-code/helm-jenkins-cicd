@@ -3,17 +3,21 @@ pipeline {
 
     environment {
         AWS_REGION = 'us-east-1'
-        ECR_REGISTRY = credentials('586794450782.dkr.ecr.us-east-1.amazonaws.com/web-app') 
+        ECR_REGISTRY = credentials('ecr-cred') 
         AWS_CREDENTIALS = credentials('aws-credentials')
         IMAGE_TAG = "${env.BUILD_NUMBER}"
-        HELM_CHART_PATH = "./my-web-app/"
+        HELM_CHART_PATH = "./"
         KUBECONFIG = "/var/lib/jenkins/.kube/config"
+    }
+
+    triggers {
+        githubPush()
     }
 
     stages {
         stage('Checkout') {
             steps {
-                git url: 'https://github.com/Joy-it-code/helm-jenkins-cicd.git', branch: 'main'
+                git branch: 'main', url: 'https://github.com/Joy-it-code/helm-jenkins-cicd.git'
             }
         }
 
@@ -26,7 +30,10 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    docker.build("${ECR_REGISTRY}:${IMAGE_TAG}", "-f Dockerfile .")
+                    // Change to parent directory (web-app/) where Dockerfile resides
+                    dir('..') {
+                        docker.build("${ECR_REGISTRY}:${IMAGE_TAG}", "-f Dockerfile .")
+                    }
                 }
             }
         }
@@ -55,7 +62,10 @@ pipeline {
 
     post {
         always {
-            sh 'docker logout'
+            // Wrap sh step in node to provide context
+            node {
+                sh 'docker logout'
+            }
         }
         success {
             echo 'Pipeline completed successfully!'
