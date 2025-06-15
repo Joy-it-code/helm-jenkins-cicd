@@ -4,15 +4,15 @@ pipeline {
     environment {
         AWS_REGION = 'us-east-1'
         ECR_REGISTRY = credentials('ecr-cred') 
-        AWS_CREDENTIALS = credentials('aws-credentials-id')
-        IMAGE_TAG = "${env.BUILD_NUMBER}"
+        AWS_CREDENTIALS = credentials('aws-credentials')
+        IMAGE_TAG = "{env.BUILD_NUMBER}"
         HELM_CHART_PATH = "./web-app/my-web-app/"
         KUBECONFIG = "/var/lib/jenkins/.kube/config"
     }
-    
-    triggers {
-        githubPush()
-    }
+
+    // triggers {
+    //     githubPush()
+    // }
 
     stages {
         stage('Checkout') {
