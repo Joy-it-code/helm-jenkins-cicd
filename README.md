@@ -661,8 +661,6 @@ kubectl get nodes
 
 
 
-
-
 ## Step 4: Helm Chart Basics
 
 ### What are Helm Charts?
@@ -1008,21 +1006,17 @@ pipeline {
 
     environment {
         AWS_REGION = 'us-east-1'
-        ECR_REGISTRY = credentials('ecr-cred') 
-        AWS_CREDENTIALS = credentials('aws-credentials')
-        IMAGE_TAG = "{env.BUILD_NUMBER}"
-        HELM_CHART_PATH = "./web-app/my-web-app/"
+        ECR_REGISTRY = '586794450782.dkr.ecr.us-east-1.amazonaws.com/web-app' 
+        AWS_CREDENTIALS = credentials('aws-credentials-id')
+        IMAGE_TAG = "1.0"  
+        HELM_CHART_PATH = "./web-app/my-web-app/"  
         KUBECONFIG = "/var/lib/jenkins/.kube/config"
-    }
-
-    triggers {
-        githubPush()
     }
 
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/Joy-it-code/helm-jenkins-cicd.git'
+                git branch: 'main', url: 'https://github.com/Joy-it-code/helm-jenkins-cicd.git', credentialsId: 'github-cred'
             }
         }
 
@@ -1034,22 +1028,13 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                script {
-                    dir('web-app') {
-                        docker.build("${ECR_REGISTRY}:${IMAGE_TAG}", "-f Dockerfile .")
-                    }
-                }
+                echo "Skipping build; using pre-existing image with tag ${IMAGE_TAG}"
             }
         }
 
         stage('Push Docker Image to ECR') {
             steps {
-                script {
-                    withAWS(credentials: 'aws-credentials-id', region: "${AWS_REGION}") {
-                        sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                        sh "docker push ${ECR_REGISTRY}:${IMAGE_TAG}"
-                    }
-                }
+                echo "Skipping push; using pre-existing image with tag ${IMAGE_TAG}"
             }
         }
 
@@ -1066,7 +1051,7 @@ pipeline {
         }
     }
 
-     post {
+    post {
         always {
             sh 'docker logout'
         }

@@ -4,10 +4,11 @@ pipeline {
     environment {
         AWS_REGION = 'us-east-1'
         ECR_REGISTRY = '586794450782.dkr.ecr.us-east-1.amazonaws.com/web-app' 
-        AWS_CREDENTIALS = credentials('aws-credentials-id')
-        IMAGE_TAG = "1.0"  
-        HELM_CHART_PATH = "./web-app/my-web-app/"  
+        IMAGE_TAG = "1.0"
+        HELM_CHART_PATH = "./web-app/my-web-app/"
         KUBECONFIG = "/var/lib/jenkins/.kube/config"
+        DOCKER_IMAGE = "${ECR_REGISTRY}:${IMAGE_TAG}"
+        DOCKERFILE_PATH = "${HELM_CHART_PATH}Dockerfile"
     }
 
     stages {
@@ -19,19 +20,26 @@ pipeline {
 
         stage('Lint Helm Chart') {
             steps {
-                sh 'helm lint ${HELM_CHART_PATH}'
+                sh "helm lint ${HELM_CHART_PATH}"
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo "Skipping build; using pre-existing image with tag ${IMAGE_TAG}"
+                script {
+                    sh "docker build -f ${DOCKERFILE_PATH} -t ${DOCKER_IMAGE} ."
+                }
             }
         }
 
         stage('Push Docker Image to ECR') {
             steps {
-                echo "Skipping push; using pre-existing image with tag ${IMAGE_TAG}"
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials-id']]) {
+                    script {
+                        sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                        sh "docker push ${DOCKER_IMAGE}"
+                    }
+                }
             }
         }
 
@@ -43,7 +51,7 @@ pipeline {
 
         stage('Test Deployment') {
             steps {
-                sh 'helm test my-web-app --namespace default'
+                sh "helm test my-web-app --namespace default"
             }
         }
     }
