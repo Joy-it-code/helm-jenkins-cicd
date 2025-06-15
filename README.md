@@ -1008,17 +1008,21 @@ pipeline {
 
     environment {
         AWS_REGION = 'us-east-1'
-        ECR_REGISTRY = credentials('ecr-repository-url') // e.g., 123456789012.dkr.ecr.us-east-1.amazonaws.com/my-web-app
+        ECR_REGISTRY = credentials('ecr-cred') 
         AWS_CREDENTIALS = credentials('aws-credentials')
-        IMAGE_TAG = "${env.BUILD_NUMBER}"
-        HELM_CHART_PATH = "./"
+        IMAGE_TAG = "{env.BUILD_NUMBER}"
+        HELM_CHART_PATH = "./web-app/my-web-app/"
         KUBECONFIG = "/var/lib/jenkins/.kube/config"
+    }
+
+    triggers {
+        githubPush()
     }
 
     stages {
         stage('Checkout') {
             steps {
-                git url: 'https://github.com/xtojy/devops-journey.git', branch: 'main'
+                git branch: 'main', url: 'https://github.com/Joy-it-code/helm-jenkins-cicd.git'
             }
         }
 
@@ -1031,7 +1035,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    dir('..') {
+                    dir('web-app') {
                         docker.build("${ECR_REGISTRY}:${IMAGE_TAG}", "-f Dockerfile .")
                     }
                 }
@@ -1041,8 +1045,10 @@ pipeline {
         stage('Push Docker Image to ECR') {
             steps {
                 script {
-                    sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
-                    sh "docker push ${ECR_REGISTRY}:${IMAGE_TAG}"
+                    withAWS(credentials: 'aws-credentials-id', region: "${AWS_REGION}") {
+                        sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                        sh "docker push ${ECR_REGISTRY}:${IMAGE_TAG}"
+                    }
                 }
             }
         }
@@ -1060,7 +1066,7 @@ pipeline {
         }
     }
 
-    post {
+     post {
         always {
             sh 'docker logout'
         }
