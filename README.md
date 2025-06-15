@@ -900,6 +900,15 @@ apiVersion: v1
 
 
 
+### Add Configure Docker
+```
+sudo usermod -aG docker jenkins
+sudo systemctl restart jenkins
+```
+
+
+
+
 ## Step 5: Working with Helm Charts
 ### 5.1: Deploy the Web Application
 

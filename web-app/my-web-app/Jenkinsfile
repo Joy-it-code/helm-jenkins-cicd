@@ -7,6 +7,8 @@ pipeline {
         IMAGE_TAG = "1.0"  
         HELM_CHART_PATH = "./web-app/my-web-app/"  
         KUBECONFIG = "/var/lib/jenkins/.kube/config"
+        DOCKER_IMAGE = "${ECR_REGISTRY}:${IMAGE_TAG}"
+        DOCKERFILE_PATH = "./web-app/Dockerfile"  
     }
 
     stages {
@@ -24,13 +26,20 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                echo "Skipping build; using pre-existing image with tag ${IMAGE_TAG}"
+                script {
+                    sh "docker build -f ${DOCKERFILE_PATH} -t ${DOCKER_IMAGE} ."
+                }
             }
         }
 
         stage('Push Docker Image to ECR') {
             steps {
-                echo "Skipping push; using pre-existing image with tag ${IMAGE_TAG}"
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials-id', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                    script {
+                        sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                        sh "docker push ${DOCKER_IMAGE}"
+                    }
+                }
             }
         }
 
