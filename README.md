@@ -169,7 +169,7 @@ variable "cluster_name" {
 ```
 # VPC
 resource "aws_vpc" "main" {
-  cidr_block = "10.0.0.0/16"
+  cidr_block = "10.1.0.0/16"
   tags = {
     Name = "jenkins-eks-vpc"
   }
@@ -179,7 +179,7 @@ resource "aws_vpc" "main" {
 resource "aws_subnet" "public" {
   count                   = 2
   vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.${count.index}.0/24"
+  cidr_block              = "10.1.${count.index}.0/24"
   availability_zone       = data.aws_availability_zones.available.names[count.index]
   map_public_ip_on_launch = true
   tags = {
@@ -336,7 +336,7 @@ resource "aws_iam_role_policy_attachment" "ecr_read_only" {
 data "aws_availability_zones" "available" {}
 data "aws_ami" "ubuntu" {
   most_recent = true
-  owners      = ["099720109477"] # Canonical
+  owners      = ["099720109477"] 
   filter {
     name   = "name"
     values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"]
@@ -480,7 +480,7 @@ terraform output
 
 
 
-## Step 3: Verify Installation
+## Step 2: Verify Installation
 
 ### Access Jenkins
 + Navigate to:
@@ -556,7 +556,8 @@ aws --version
 
 
 
-## Step 2: Configure EKS Access
+
+## 2.1: Configure EKS Access
 
 + Update your kubectl configuration to access the EKS cluster:
 ```
@@ -659,9 +660,9 @@ kubectl get nodes
 + **Explanation:** Prevents malicious requests from executing unauthorized actions.
 
 
+----
 
-
-## Step 4: Helm Chart Basics
+## Step 3: Helm Chart Basics
 
 ### What are Helm Charts?
 
@@ -674,12 +675,12 @@ kubectl get nodes
 **Purpose:** Standardizes and automates deployment, making it repeatable and manageable.
 
 
-### 4.1: Create a Basic Helm Chart  
+### 3.1: Create a Basic Helm Chart  
 
 Create a Helm chart for a web application serving an index.html file via an Nginx server.
 
 
-### 4.2: Create a Web Application:
+### 3.2: Create a Web Application:
 ```
 cd ~/helm-jenkins-cicd
 mkdir web-app
@@ -704,7 +705,7 @@ touch index.html
    </html>
 ```
 
-### 4.3: Create a Dockerfile:
+### Create a Dockerfile:
 ```
 touch Dockerfile
 ```
@@ -796,7 +797,7 @@ __pycache__/
 
 
 
-### 4.4: Create the Helm Chart:
+### 3.4: Create the Helm Chart:
 
 ```
 helm create my-web-app
@@ -812,7 +813,7 @@ helm create my-web-app
 **.helmignore:** Files to ignore during packaging
 
 
-### 4.5: Modify the Helm Chart:
+### 3.4: Modify the Helm Chart:
 
 Simplify the chart for the web application.
 
@@ -906,7 +907,7 @@ sudo usermod -aG docker jenkins
 sudo systemctl restart jenkins
 ```
 
-
+----
 
 
 ## Step 5: Working with Helm Charts
@@ -951,7 +952,7 @@ Open http://localhost:8090 on browser.
 
 
 
-
+----
 
 ## Step 6: Upgrading and Rolling Back
 
@@ -985,6 +986,7 @@ helm rollback my-web-app-app <revision_number>
 
 
 
+
 ## Step 6.1: Integrating Helm with Helm Charts
 
 + Create a Jenkins pipeline to automate building, pushing Docker images, and deploying the Helm chart.
@@ -1015,17 +1017,18 @@ pipeline {
 
     environment {
         AWS_REGION = 'us-east-1'
-        ECR_REGISTRY = '586794450782.dkr.ecr.us-east-1.amazonaws.com/web-app' 
-        AWS_CREDENTIALS = credentials('aws-credentials-id')
+        ECR_REGISTRY = '<ecr-url>.dkr.ecr.us-east-1.amazonaws.com/web-app' 
         IMAGE_TAG = "1.0"  
         HELM_CHART_PATH = "./web-app/my-web-app/"  
         KUBECONFIG = "/var/lib/jenkins/.kube/config"
+        DOCKER_IMAGE = "${ECR_REGISTRY}:${IMAGE_TAG}"
+        DOCKERFILE_PATH = "./web-app/Dockerfile"  
     }
 
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/Joy-it-code/helm-jenkins-cicd.git', credentialsId: 'github-cred'
+                git branch: 'main', url: 'https://github.com/<github-username>/helm-jenkins-cicd.git', credentialsId: 'github-cred'
             }
         }
 
@@ -1037,13 +1040,20 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                echo "Skipping build; using pre-existing image with tag ${IMAGE_TAG}"
+                script {
+                    sh "docker build -f ${DOCKERFILE_PATH} -t ${DOCKER_IMAGE} ./web-app"
+                }
             }
         }
 
         stage('Push Docker Image to ECR') {
             steps {
-                echo "Skipping push; using pre-existing image with tag ${IMAGE_TAG}"
+                withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-credentials-id', accessKeyVariable: 'AWS_ACCESS_KEY_ID', secretKeyVariable: 'AWS_SECRET_ACCESS_KEY']]) {
+                    script {
+                        sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+                        sh "docker push ${DOCKER_IMAGE}"
+                    }
+                }
             }
         }
 
@@ -1178,15 +1188,75 @@ git push origin main
 ```
 
 
+### Rollback (chart revision-number)
+```
+helm history my-web-app -n default
+helm rollback my-web-app 8 -n default
+```
+
+
+### Verify Rollback
+```
+helm history my-web-app -n default
+helm status my-web-app -n default
+kubectl get pods -n default
+```
+
+
+
+## Verify Successful Deployment
+
+### Jenkins Output
+![](./img/7l.sucess.console.tick.png)
+![](./img/7i.console.output1.png)
+![](./img/7j.console2.png)
+![](./img/7k.console3.png)
+![](./img/7k.console4.png)
+
+
++ ### Port Forward
+```
+aws eks update-kubeconfig --region us-east-1 --name my-eks-cluster
+Updated context arn:aws:eks:us-east-1:<aws-account-id>:cluster/my-eks-cluster in C:\Users\xtojy\.kube\config
+kubectl get pods -n default
+kubectl port-forward pod/my-web-app-56bc7766bb-2bxcn 7000:80 -n default
+```
+[](./img/8d.port.forwd.jenkins.png)
+
+
++ ### Check Pod Status
+```
+aws eks list-cluster
+kubectl get pods -n default -l "app.kubernetes.io/name=my-web-app,app.kubernetes.io/instance=my-web-app"
+```
+
++ ### Check Service/Ingress:
+```
+kubectl get svc -n default
+```
+![](./img/8a.list.cluster.png)
+![](./img/8e.kubectl.get.png)
+
+
+
 ## Destroy Infrastructure
 ```
 terraform destroy
 ```
 
 
+## Commit and Push Your GitHub
+```
+git add .
+git commit -m "update file"
+git push 
+```
+----
+
+
 ## Conclusion
 
-This project is a practical demonstration of using Helm and Jenkins to manage Kubernetes-based application deployments. By containerizing the app and orchestrating the CI/CD pipeline with Jenkins, this setup achieves full automation from code push to deployment on EKS.
+This project is a practical demonstration of using Helm and Jenkins to manage Kubernetes-based application deployments. By containerizing the app and orchestrating the CI/CD pipeline with Jenkins, this setup achieves automation from code push to deployment on EKS.
 
 With Helm handling application releases, and Jenkins controlling the CI/CD pipeline, the process becomes efficient, scalable, and production-ready.
 
