@@ -9,7 +9,7 @@ pipeline {
         HELM_CHART_PATH = "./web-app/my-web-app/"
         KUBECONFIG = "/var/lib/jenkins/.kube/config"
     }
-
+    
     triggers {
         githubPush()
     }
