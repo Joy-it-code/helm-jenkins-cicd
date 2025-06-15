@@ -27,7 +27,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    sh "docker build -f ${DOCKERFILE_PATH} -t ${DOCKER_IMAGE} ."
+                    sh "docker build -f ${DOCKERFILE_PATH} -t ${DOCKER_IMAGE} ./web-app"
                 }
             }
         }
