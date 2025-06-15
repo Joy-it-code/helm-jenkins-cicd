@@ -1128,7 +1128,7 @@ Click Save.
 
 ### Add Credentials:
 
-+ Go to **Manage Jenkins** > **Manage Credentials** > **System** > **Add Credentials.**
++ Go to **Manage Jenkins > Manage Credentials > System > Add Credentials.**
 
 + Add aws-region (Kind: Secret text, Value: us-east-1).
 
