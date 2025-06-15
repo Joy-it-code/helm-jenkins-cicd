@@ -3,8 +3,8 @@ pipeline {
 
     environment {
         AWS_REGION = 'us-east-1'
-        ECR_REGISTRY = credentials('ecr-cred') 
-        AWS_CREDENTIALS = credentials('aws-credentials')
+        ECR_REGISTRY = credentials('586794450782.dkr.ecr.us-east-1.amazonaws.com/web-app') 
+        AWS_CREDENTIALS = credentials('aws-credentials-id')
         IMAGE_TAG = "{env.BUILD_NUMBER}"
         HELM_CHART_PATH = "./web-app/my-web-app/"
         KUBECONFIG = "/var/lib/jenkins/.kube/config"
@@ -31,7 +31,8 @@ pipeline {
             steps {
                 script {
                     dir('web-app') {
-                        docker.build("${ECR_REGISTRY}:${IMAGE_TAG}", "-f Dockerfile .")
+                        def imageName = "${ECR_REGISTRY}:${IMAGE_TAG}"
+                        docker.build(imageName, "-f Dockerfile .")
                     }
                 }
             }
